@@ -9,7 +9,7 @@
   <!-- 카카오 지도: developers.kakao.com 앱키 JavaScript 키(REST 아님). head appkey = 본문 KAKAO_MAP_APP_KEY 동일 -->
   <script
     defer
-    src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=6495819fc2dd3d2824976df7e1c9060b&autoload=false&libraries=services"
+    src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=611835b33b697e5a725baa288d73c371&autoload=false&libraries=services"
     data-kakao-maps-sdk="1"
   ></script>
   <style>
@@ -500,7 +500,7 @@
 
   <script type="text/babel">
     const API_KEY = "2ba7044ef9756dd0439e626b23ab06f0c87c36f8bb629a7e543fc1eac69714d5";
-    const KAKAO_MAP_APP_KEY = "6495819fc2dd3d2824976df7e1c9060b";
+    const KAKAO_MAP_APP_KEY = "611835b33b697e5a725baa288d73c371";
     const ENDPOINT = "https://api.odcloud.kr/api/15030060/v1/uddi:9e22257e-6119-40c2-8a0e-986957bcf2cb";
     const PAGE_SIZE = 100;
     const STEP = 12;
@@ -659,7 +659,7 @@
               content: `<div style="padding:8px 10px;font-size:13px;max-width:220px;line-height:1.35;"><strong>${infoName.replace(/</g, "&lt;")}</strong><br/><span style="color:#64748b;">${address.replace(/</g, "&lt;")}</span></div>`,
             });
             iw.open(map, marker);
-            const stopRelayoutTimers = scheduleMapRelayout(map);
+            const stopRelayoutTimers = scheduleMapRelayout(map, lat, lng);
             mapTarget._stopMapRelayout = stopRelayoutTimers;
             setMapStatus("카카오 지도 · 주소 검색 결과");
           };
