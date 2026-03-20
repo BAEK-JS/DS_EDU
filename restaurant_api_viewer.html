@@ -4,6 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>대전 동구 음식점 목록 (React)</title>
+  <link rel="dns-prefetch" href="https://dapi.kakao.com" />
+  <link rel="preconnect" href="https://dapi.kakao.com" crossorigin />
+  <!-- 카카오 지도: developers.kakao.com 앱키 JavaScript 키(REST 아님). head appkey = 본문 KAKAO_MAP_APP_KEY 동일 -->
+  <script
+    defer
+    src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=6495819fc2dd3d2824976df7e1c9060b&autoload=false&libraries=services"
+    data-kakao-maps-sdk="1"
+  ></script>
   <style>
     :root {
       --bg: #f7f9fc;
@@ -370,6 +378,117 @@
         width: 100%;
       }
     }
+
+    .restaurant-card {
+      cursor: pointer;
+    }
+
+    .restaurant-card:focus-visible {
+      outline: 2px solid var(--primary);
+      outline-offset: 3px;
+    }
+
+    .card-hint {
+      margin: 10px 0 0;
+      font-size: 12px;
+      color: #64748b;
+    }
+
+    .map-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      animation: fadeIn 0.08s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .map-modal {
+      background: var(--surface);
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      box-shadow: 0 25px 50px rgba(15, 23, 42, 0.2);
+      max-width: 720px;
+      width: 100%;
+      max-height: 90vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .map-modal-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .map-modal-title {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .map-modal-address {
+      margin: 6px 0 0;
+      font-size: 13px;
+      color: var(--sub);
+      line-height: 1.4;
+    }
+
+    .map-modal-close {
+      flex-shrink: 0;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      color: #334155;
+    }
+
+    .map-modal-close:hover {
+      background: #f8fafc;
+    }
+
+    .map-wrap {
+      position: relative;
+      width: 100%;
+      height: min(420px, 55vh);
+      min-height: 280px;
+      background: #e5e7eb;
+    }
+
+    #kakao-map-root {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      min-height: 260px;
+    }
+
+    .map-modal-status {
+      padding: 12px 18px;
+      font-size: 13px;
+      color: var(--sub);
+      border-top: 1px solid var(--line);
+      background: #f9fafb;
+    }
+
+    .map-modal-status.error {
+      color: #991b1b;
+      background: #fef2f2;
+    }
   </style>
 </head>
 <body>
@@ -381,9 +500,13 @@
 
   <script type="text/babel">
     const API_KEY = "2ba7044ef9756dd0439e626b23ab06f0c87c36f8bb629a7e543fc1eac69714d5";
+    const KAKAO_MAP_APP_KEY = "6495819fc2dd3d2824976df7e1c9060b";
     const ENDPOINT = "https://api.odcloud.kr/api/15030060/v1/uddi:9e22257e-6119-40c2-8a0e-986957bcf2cb";
     const PAGE_SIZE = 100;
     const STEP = 12;
+
+    const geocodeCache = new Map();
+    let geocoderSingleton = null;
 
     function RestaurantApp() {
       const [restaurants, setRestaurants] = React.useState([]);
@@ -393,6 +516,234 @@
       const [searchInput, setSearchInput] = React.useState("");
       const [keyword, setKeyword] = React.useState("");
       const [selectedDong, setSelectedDong] = React.useState("전체");
+      const [kakaoReady, setKakaoReady] = React.useState(false);
+      const [mapTarget, setMapTarget] = React.useState(null);
+      const [mapStatus, setMapStatus] = React.useState("");
+      const mapContainerRef = React.useRef(null);
+
+      React.useEffect(() => {
+        let cancelled = false;
+        let kakaoLoadStarted = false;
+        function finishKakaoInit() {
+          if (!window.kakao || !window.kakao.maps) {
+            return false;
+          }
+          if (kakaoLoadStarted) {
+            return true;
+          }
+          kakaoLoadStarted = true;
+          if (typeof kakao.maps.load === "function") {
+            kakao.maps.load(() => {
+              if (!cancelled) {
+                setKakaoReady(true);
+              }
+            });
+          } else if (!cancelled) {
+            setKakaoReady(true);
+          }
+          return true;
+        }
+        function tryInitFromGlobal() {
+          return finishKakaoInit();
+        }
+        if (tryInitFromGlobal()) {
+          return () => {
+            cancelled = true;
+          };
+        }
+        let script = document.querySelector('script[data-kakao-maps-sdk="1"]');
+        if (!script) {
+          script = document.createElement("script");
+          script.setAttribute("data-kakao-maps-sdk", "1");
+          script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_MAP_APP_KEY}&autoload=false&libraries=services`;
+          script.async = true;
+          script.onerror = () => {
+            if (!cancelled) {
+              setMapStatus(
+                "카카오 지도 스크립트를 불러오지 못했습니다. JavaScript 키·플랫폼 Web 도메인·http(s) 접속을 확인하세요. (file:// 직접 열기는 차단될 수 있습니다)"
+              );
+            }
+          };
+          document.head.appendChild(script);
+        }
+        const onScriptLoaded = () => tryInitFromGlobal();
+        script.addEventListener("load", onScriptLoaded, { once: true });
+        // defer/캐시 등으로 load 이벤트가 이미 지난 뒤에도 동작하도록
+        requestAnimationFrame(() => {
+          if (!cancelled && window.kakao && window.kakao.maps) {
+            onScriptLoaded();
+          }
+        });
+        const poll = window.setInterval(() => {
+          if (cancelled) {
+            window.clearInterval(poll);
+            return;
+          }
+          if (window.kakao && window.kakao.maps) {
+            window.clearInterval(poll);
+            onScriptLoaded();
+          }
+        }, 100);
+        const pollStop = window.setTimeout(() => window.clearInterval(poll), 20000);
+        return () => {
+          cancelled = true;
+          window.clearInterval(poll);
+          window.clearTimeout(pollStop);
+        };
+      }, []);
+
+      React.useLayoutEffect(() => {
+        if (!mapTarget || !kakaoReady) {
+          return undefined;
+        }
+        const address = String(mapTarget["소재지(도로명)"] || "").trim();
+        if (!address || address === "-") {
+          setMapStatus("표시할 주소가 없습니다.");
+          return undefined;
+        }
+
+        let cancelled = false;
+        const infoName = String(mapTarget["업소명"] || "음식점");
+
+        function scheduleMapRelayout(map) {
+          const relayout = () => {
+            try {
+              map.relayout();
+            } catch (e) {}
+          };
+          relayout();
+          requestAnimationFrame(() => {
+            relayout();
+            requestAnimationFrame(relayout);
+          });
+          const t1 = window.setTimeout(relayout, 80);
+          const t2 = window.setTimeout(relayout, 320);
+          const t3 = window.setTimeout(relayout, 700);
+          window.addEventListener("resize", relayout);
+          return () => {
+            window.removeEventListener("resize", relayout);
+            window.clearTimeout(t1);
+            window.clearTimeout(t2);
+            window.clearTimeout(t3);
+          };
+        }
+
+        function mountMapAt(lat, lng) {
+          let attempts = 0;
+          const paint = () => {
+            if (cancelled) {
+              return;
+            }
+            attempts += 1;
+            if (attempts > 240) {
+              setMapStatus("지도 영역을 준비하지 못했습니다. 닫기 후 다시 열어 주세요.");
+              return;
+            }
+            const el = mapContainerRef.current;
+            if (!el) {
+              requestAnimationFrame(paint);
+              return;
+            }
+            if (el.offsetWidth < 2 || el.offsetHeight < 2) {
+              requestAnimationFrame(paint);
+              return;
+            }
+            el.innerHTML = "";
+            const coords = new kakao.maps.LatLng(lat, lng);
+            const map = new kakao.maps.Map(el, {
+              center: coords,
+              level: 3,
+            });
+            const marker = new kakao.maps.Marker({ position: coords, map });
+            const iw = new kakao.maps.InfoWindow({
+              content: `<div style="padding:8px 10px;font-size:13px;max-width:220px;line-height:1.35;"><strong>${infoName.replace(/</g, "&lt;")}</strong><br/><span style="color:#64748b;">${address.replace(/</g, "&lt;")}</span></div>`,
+            });
+            iw.open(map, marker);
+            const stopRelayoutTimers = scheduleMapRelayout(map);
+            mapTarget._stopMapRelayout = stopRelayoutTimers;
+            setMapStatus("카카오 지도 · 주소 검색 결과");
+          };
+          requestAnimationFrame(() => requestAnimationFrame(paint));
+        }
+
+        function buildAddressVariants(raw) {
+          const a = String(raw || "").trim();
+          const out = [];
+          if (a) {
+            out.push(a);
+          }
+          if (a && !/대전광역시/.test(a) && !/^대전시\s/.test(a)) {
+            out.push("대전광역시 " + a.replace(/^\s*대전\s+/, ""));
+          }
+          return [...new Set(out)];
+        }
+
+        const cached = geocodeCache.get(address);
+        if (cached) {
+          setMapStatus("지도 표시 중…");
+          mountMapAt(cached.lat, cached.lng);
+          return () => {
+            cancelled = true;
+            if (typeof mapTarget._stopMapRelayout === "function") {
+              mapTarget._stopMapRelayout();
+            }
+          };
+        }
+
+        setMapStatus("위치를 찾는 중…");
+        if (!geocoderSingleton) {
+          geocoderSingleton = new kakao.maps.services.Geocoder();
+        }
+        const variants = buildAddressVariants(address);
+        let variantIndex = 0;
+        function tryGeocode() {
+          if (cancelled) {
+            return;
+          }
+          if (variantIndex >= variants.length) {
+            setMapStatus(
+              "주소를 지도에서 찾지 못했습니다. 도로명 주소를 확인하거나, 카카오 콘솔 Web 도메인·JavaScript 키·http 접속을 확인하세요."
+            );
+            return;
+          }
+          const query = variants[variantIndex++];
+          geocoderSingleton.addressSearch(query, (results, status) => {
+            if (cancelled) {
+              return;
+            }
+            if (status === kakao.maps.services.Status.OK && results && results[0]) {
+              const lat = Number(results[0].y);
+              const lng = Number(results[0].x);
+              geocodeCache.set(address, { lat, lng });
+              mountMapAt(lat, lng);
+              return;
+            }
+            tryGeocode();
+          });
+        }
+        tryGeocode();
+
+        return () => {
+          cancelled = true;
+          if (typeof mapTarget._stopMapRelayout === "function") {
+            mapTarget._stopMapRelayout();
+            mapTarget._stopMapRelayout = null;
+          }
+        };
+      }, [mapTarget, kakaoReady]);
+
+      function handleCardClick(item) {
+        setMapTarget(item);
+        setMapStatus(kakaoReady ? "위치를 찾는 중…" : "지도를 불러오는 중…");
+      }
+
+      function closeMapModal() {
+        setMapTarget(null);
+        setMapStatus("");
+        if (mapContainerRef.current) {
+          mapContainerRef.current.innerHTML = "";
+        }
+      }
 
       function extractDong(address) {
         const text = String(address || "");
@@ -638,13 +989,26 @@
               <>
                 <div className="restaurant-grid">
                   {visibleItems.map((item, index) => (
-                    <article className="restaurant-card" key={`${item["업소명"] || "item"}-${index}`}>
+                    <article
+                      className="restaurant-card"
+                      key={`${item["업소명"] || "item"}-${index}`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => handleCardClick(item)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          handleCardClick(item);
+                        }
+                      }}
+                    >
                       <div className="card-head">
                         <h3 className="restaurant-name">{renderHighlighted(item["업소명"] || "-")}</h3>
                         <span className="index-chip">{index + 1}</span>
                       </div>
                       <p className="restaurant-type">업종: {item["업종명"] || "-"}</p>
                       <p className="restaurant-address">주소: {renderHighlighted(item["소재지(도로명)"] || "-")}</p>
+                      <p className="card-hint">클릭하면 카카오 지도에서 위치를 확인할 수 있습니다.</p>
                     </article>
                   ))}
                 </div>
@@ -658,6 +1022,56 @@
                 )}
               </>
             )}
+
+            {mapTarget &&
+              ReactDOM.createPortal(
+                <div
+                  className="map-modal-backdrop"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="map-modal-heading"
+                  onClick={(e) => {
+                    if (e.target === e.currentTarget) {
+                      closeMapModal();
+                    }
+                  }}
+                >
+                  <div className="map-modal" onClick={(e) => e.stopPropagation()}>
+                    <div className="map-modal-header">
+                      <div>
+                        <h2 id="map-modal-heading" className="map-modal-title">
+                          {mapTarget["업소명"] || "음식점 위치"}
+                        </h2>
+                        <p className="map-modal-address">{mapTarget["소재지(도로명)"] || "-"}</p>
+                      </div>
+                      <button type="button" className="map-modal-close" onClick={closeMapModal}>
+                        닫기
+                      </button>
+                    </div>
+                    <div className="map-wrap">
+                      <div id="kakao-map-root" ref={mapContainerRef} />
+                    </div>
+                    {(mapStatus || !kakaoReady) && (
+                      <div
+                        className={`map-modal-status ${
+                          mapStatus &&
+                          (mapStatus.includes("못") ||
+                            mapStatus.includes("없") ||
+                            mapStatus.includes("불러오지") ||
+                            mapStatus.includes("준비하지"))
+                            ? "error"
+                            : ""
+                        }`}
+                      >
+                        {!kakaoReady
+                          ? "카카오 지도 SDK 로딩 중… (멈추면 JavaScript 키·Web 도메인·http/localhost로 열기를 확인하세요)"
+                          : mapStatus}
+                      </div>
+                    )}
+                  </div>
+                </div>,
+                document.body
+              )}
           </section>
         </main>
       );
