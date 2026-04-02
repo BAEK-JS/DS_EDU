@@ -465,13 +465,15 @@
     .map-wrap {
       position: relative;
       width: 100%;
-      height: min(420px, 55vh);
+      height: 420px;
       min-height: 280px;
       background: #e5e7eb;
     }
 
     #kakao-map-root {
-      position: relative;
+      position: absolute;
+      top: 0;
+      left: 0;
       width: 100%;
       height: 100%;
       min-height: 260px;
@@ -592,7 +594,7 @@
         };
       }, []);
 
-      React.useLayoutEffect(() => {
+      React.useEffect(() => {
         if (!mapTarget || !kakaoReady) {
           return undefined;
         }
@@ -609,19 +611,18 @@
           const relayout = () => {
             try {
               map.relayout();
-            } catch (e) {}
+            } catch (e) {
+              console.error("Map relayout error:", e);
+            }
           };
-          relayout();
-          requestAnimationFrame(() => {
-            relayout();
-            requestAnimationFrame(relayout);
-          });
-          const t1 = window.setTimeout(relayout, 80);
-          const t2 = window.setTimeout(relayout, 320);
+          const t0 = window.setTimeout(relayout, 50);
+          const t1 = window.setTimeout(relayout, 150);
+          const t2 = window.setTimeout(relayout, 350);
           const t3 = window.setTimeout(relayout, 700);
           window.addEventListener("resize", relayout);
           return () => {
             window.removeEventListener("resize", relayout);
+            window.clearTimeout(t0);
             window.clearTimeout(t1);
             window.clearTimeout(t2);
             window.clearTimeout(t3);
@@ -635,7 +636,7 @@
               return;
             }
             attempts += 1;
-            if (attempts > 240) {
+            if (attempts > 300) {
               setMapStatus("지도 영역을 준비하지 못했습니다. 닫기 후 다시 열어 주세요.");
               return;
             }
@@ -648,22 +649,29 @@
               requestAnimationFrame(paint);
               return;
             }
-            el.innerHTML = "";
-            const coords = new kakao.maps.LatLng(lat, lng);
-            const map = new kakao.maps.Map(el, {
-              center: coords,
-              level: 3,
-            });
-            const marker = new kakao.maps.Marker({ position: coords, map });
-            const iw = new kakao.maps.InfoWindow({
-              content: `<div style="padding:8px 10px;font-size:13px;max-width:220px;line-height:1.35;"><strong>${infoName.replace(/</g, "&lt;")}</strong><br/><span style="color:#64748b;">${address.replace(/</g, "&lt;")}</span></div>`,
-            });
-            iw.open(map, marker);
-            const stopRelayoutTimers = scheduleMapRelayout(map, lat, lng);
-            mapTarget._stopMapRelayout = stopRelayoutTimers;
-            setMapStatus("카카오 지도 · 주소 검색 결과");
+            try {
+              el.innerHTML = "";
+              const coords = new kakao.maps.LatLng(lat, lng);
+              const map = new kakao.maps.Map(el, {
+                center: coords,
+                level: 3,
+              });
+              const marker = new kakao.maps.Marker({ position: coords, map });
+              const iw = new kakao.maps.InfoWindow({
+                content: `<div style="padding:8px 10px;font-size:13px;max-width:220px;line-height:1.35;"><strong>${infoName.replace(/</g, "&lt;")}</strong><br/><span style="color:#64748b;">${address.replace(/</g, "&lt;")}</span></div>`,
+              });
+              iw.open(map, marker);
+              const stopRelayoutTimers = scheduleMapRelayout(map);
+              mapTarget._stopMapRelayout = stopRelayoutTimers;
+              setMapStatus("카카오 지도 · 주소 검색 결과");
+            } catch (e) {
+              console.error("Map mount error:", e);
+              setMapStatus("지도 로딩 중 오류가 발생했습니다: " + e.message);
+            }
           };
-          requestAnimationFrame(() => requestAnimationFrame(paint));
+          window.setTimeout(() => {
+            requestAnimationFrame(() => requestAnimationFrame(paint));
+          }, 100);
         }
 
         function buildAddressVariants(raw) {
